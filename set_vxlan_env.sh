@@ -76,7 +76,7 @@ set_vxlan() {
         set -e
         ip netns exec vxlan100gw iptables --table nat --flush
         ip netns exec vxlan100gw iptables --table nat --append POSTROUTING --source ${VXLAN_NAT_SOURCE_IP} --jump MASQUERADE
-        ip netns exec vxlan100gw iptables --table nat --list
+        ip netns exec vxlan100gw iptables -n --table nat --list
     ) || {
         echo "Failed to set MASQUERADE of the iptables." >&2
         return 1
