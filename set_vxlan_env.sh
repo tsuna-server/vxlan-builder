@@ -30,10 +30,10 @@ set_vxlan() {
     (
         # Create a GW connects VXLAN and outer local network segments.
         set -e
-        brctl addbr br100
+        #brctl addbr br100
         brctl addif br100 vxlan100
         brctl stp br100 off
-        ip link set up dev br100
+        #ip link set up dev br100
         ip link set up dev vxlan100
 
         ip link add name veth1 type veth peer name veth1-br
@@ -75,8 +75,12 @@ set_vxlan() {
     (
         set -e
         ip netns exec vxlan100gw iptables --table nat --flush
-        ip netns exec vxlan100gw iptables --table nat --append POSTROUTING --source ${VXLAN_NAT_SOURCE_IP} --jump MASQUERADE
-        ip netns exec vxlan100gw iptables -n --table nat --list
+        ip netns exec vxlan100gw iptables --table nat \
+                --append POSTROUTING --source ${VXLAN_NAT_SOURCE_IP_TO_INTERNET} --jump MASQUERADE
+        ip netns exec vxlan100gw iptables --table nat \
+                --append POSTROUTING --source ${VXLAN_NAT_SOURCE_IP_TO_VXLAN} \
+                --destination ${VXLAN_NAT_SOURCE_IP_TO_INTERNET} --jump MASQUERADE
+        ip netns exec vxlan100gw iptables --table nat --list
     ) || {
         echo "Failed to set MASQUERADE of the iptables." >&2
         return 1
