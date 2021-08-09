@@ -29,6 +29,9 @@ init_env() {
 log_err() {
     echo "ERROR: $1" >&2
 }
+log_info() {
+    echo "INFO: $1"
+}
 
 set_vxlan() {
 
@@ -89,17 +92,22 @@ set_vxlan() {
         set -e
         ip netns exec ${VXLAN_GW_NAME} iptables --table nat --flush
         ip netns exec ${VXLAN_GW_NAME} iptables --table nat \
-                --append POSTROUTING --source ${VXLAN_NAT_SOURCE_IP_TO_INTERNET} --jump MASQUERADE
+                --append POSTROUTING --source ${VXLAN_NAT_SOURCE_IP_TO_EXTERNAL_NETWORK} --jump MASQUERADE
         ip netns exec ${VXLAN_GW_NAME} iptables --table nat \
-                --append POSTROUTING --source ${VXLAN_NAT_SOURCE_IP_TO_VXLAN} \
-                --destination ${VXLAN_NAT_SOURCE_IP_TO_INTERNET} --jump MASQUERADE
+                --append POSTROUTING --source ${VXLAN_NAT_SOURCE_IP_TO_INNER_SEGMENT} \
+                --destination ${VXLAN_NAT_SOURCE_IP_TO_OUTER_SEGMENT} --jump MASQUERADE
         ip netns exec ${VXLAN_GW_NAME} iptables --table nat --list
     ) || {
-        echo "Failed to set MASQUERADE of the iptables." >&2
+        log_err "Failed to set MASQUERADE of the iptables."
         return 1
     }
 
     return 0
+}
+
+x_brctl_addif() {
+    local vxlan_external_bridge_name="$1"
+    local vxlan_name="$2"
 }
 
 main "$@"
