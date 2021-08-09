@@ -21,7 +21,12 @@ init_env() {
 
     HOST_BRIDGE_IP=$(ip address show dev "$HOST_BRIDGE_INTERFACE" \
             | grep -o "inet [0-9]*\.[0-9]*\.[0-9]*\.[0-9]*" \
-            | grep -o "[0-9]*\.[0-9]*\.[0-9]*\.[0-9]*")
+            | cut -d ' ' -f 2)
+
+    [[ -z "$HOST_BRIDGE_IP" ]] && {
+        log_err "Failed to get IP of the interface \"$HOST_BRIDGE_INTERFACE\""
+        return 1
+    }
 
     return 0
 }
@@ -34,31 +39,24 @@ log_info() {
 }
 
 set_vxlan() {
-
-
-    ip link add ${VXLAN_NAME} type vxlan id 9 dstport 4789 \
-            local ${HOST_BRIDGE_IP} group 239.1.1.1 dev $HOST_BRIDGE_INTERFACE || {
-        log_err "Failed to create a name space \"vxlan100\""
-        return 1
-    }
-
     # Create interfaces
     (
         # Create a GW connects VXLAN and outer local network segments.
         set -e
+        x_ip_link_add_vxlan ${VXLAN_NAME} ${HOST_BRIDGE_IP} ${HOST_BRIDGE_INTERFACE}
         #brctl addbr br100
-        brctl addif ${VXLAN_EXTERNAL_BRIDGE_NAME} ${VXLAN_NAME}
+        x_brctl_addif ${VXLAN_EXTERNAL_BRIDGE_NAME} ${VXLAN_NAME}
         brctl stp ${VXLAN_EXTERNAL_BRIDGE_NAME} off
         #ip link set up dev br100
-        ip link set up dev ${VXLAN_NAME}
+        ip link set up dev ${VXLAN_EXTERNAL_BRIDGE_NAME}
 
-        ip link add name veth1 type veth peer name veth1-br
-        ip netns add ${VXLAN_GW_NAME}
-        brctl addif ${VXLAN_EXTERNAL_BRIDGE_NAME} veth1-br
-        ip link set veth1 netns ${VXLAN_GW_NAME}
-        ip link add name veth2 type veth peer name veth2-br
-        ip link set veth2 netns ${VXLAN_GW_NAME}
-        brctl addif br0 veth2-br
+        x_ip_netns_add ${VXLAN_GW_NAME}
+        x_ip_link_add_name_veth veth1 veth1-br
+        x_brctl_addif ${VXLAN_EXTERNAL_BRIDGE_NAME} veth1-br
+        x_ip_link_set_veth_to_netns veth1 ${VXLAN_GW_NAME}
+        x_ip_link_add_name_veth veth2 veth2-br
+        x_ip_link_set_veth_to_netns veth2 ${VXLAN_GW_NAME}
+        x_brctl_addif ${HOST_BRIDGE_INTERFACE} veth2-br
 
         ip link set veth1-br up
         ip netns exec ${VXLAN_GW_NAME} ip link set veth1 up
@@ -66,24 +64,13 @@ set_vxlan() {
         ip netns exec ${VXLAN_GW_NAME} ip link set veth2 up
 
         ip netns exec ${VXLAN_GW_NAME} sysctl net.ipv4.ip_forward=1
+
+        # Add IP to the interface on namespace
+        x_ip_address_add_to_interface_on_netns ${VXLAN_GW_NAME} ${VXLAN_GW_INNER_IP} veth1
+        x_ip_address_add_to_interface_on_netns ${VXLAN_GW_NAME} ${VXLAN_GW_OUTER_IP} veth2
+        x_add_default_gw_on_netns ${VXLAN_GW_NAME} ${PROVIDER_GW}
     ) || {
         echo "Failed to create bridges and a namespace." >&2
-        return 1
-    }
-
-    #ip netns exec vxlan100gw ip address add 192.168.2.1/24 dev veth1
-    ip netns exec ${VXLAN_GW_NAME} ip address add ${VXLAN_GW_INNER_IP} dev veth1 || {
-        echo "Failed to set vxlan gw inner IP as ${VXLAN_GW_INNER_IP} on veth1" >&2
-        return 1
-    }
-    #ip netns exec vxlan100gw ip address add 192.168.1.254/24 dev veth2
-    ip netns exec ${VXLAN_GW_NAME} ip address add ${VXLAN_GW_OUTER_IP} dev veth2 || {
-        echo "Failed to set vxlan gw inner IP as ${VXLAN_GW_OUTER_IP} on veth2" >&2
-        return 1
-    }
-
-    ip netns exec ${VXLAN_GW_NAME} ip route add default via ${PRIVODER_GW} || {
-        echo "Failed to set default gw IP ${PROVIDER_GW} of the namespace ${VXLAN_GW_NAME}." >&2
         return 1
     }
 
@@ -105,9 +92,107 @@ set_vxlan() {
     return 0
 }
 
+x_add_default_gw_on_netns() {
+    local netns_name="$1"
+    local next_hop_ip="$2"
+
+    ip netns exec vxlan100gw ip route show default | grep -q -P '^default ' && {
+        log_info "Default gateway has already set on netns \"$netns_name\". Skipping set it"
+        return 0
+    }
+
+    ip netns exec $netns_name ip route add default via $next_hop_ip
+}
+
+x_ip_address_add_to_interface_on_netns() {
+    local netns_name="$1"
+    local ip="$2"
+    local interface_in_netns="$3"
+
+    local interface_ip="$(ip netns exec $netns_name ip address show $interface_in_netns | grep -o "inet [0-9]*\.[0-9]*\.[0-9]*\.[0-9]*" | cut -d ' ' -f 2)"
+
+    [[ "$interface_ip" == "$ip" ]] && {
+        log_info "IP \"$ip\" has already set in netns \"$netns_name\". Skipping set it"
+        return 0
+    }
+
+    ip netns exec ${VXLAN_GW_NAME} ip address add ${VXLAN_GW_INNER_IP} dev veth1
+}
+
+# Add bridge only if it was not added.
 x_brctl_addif() {
-    local vxlan_external_bridge_name="$1"
-    local vxlan_name="$2"
+    local bridge_name_to_add="$1"
+    local bridge_name_to_be_added="$2"
+    local line
+
+    while read line; do
+        [[ "$line" == "$bridge_name_to_be_added" ]] && {
+            log_info "The bridge \"$bridge_name_to_be_added\" is already added to \"$bridge_name_to_add\"."
+            return 0
+        }
+    done < <(brctl show $bridge_name_to_add | tail +2 | sed -e 's/.*\s\([^\s]\+\)$/\1/g')
+
+    brctl addif $bridge_name_to_add $bridge_name_to_be_added || {
+        log_err "Failed to add bridge \"$bridge_name_to_be_added\" to \"$bridge_name_to_add\"."
+        return 1
+    }
+
+    log_info "Succeeded in adding a bridge \"$bridge_name_to_be_added\" to \"$bridge_name_to_add\"."
+    return 0
+}
+
+x_ip_link_set_veth_to_netns() {
+    local veth_name="$1"
+    local vxlan_gw_netns_name="$2"
+    local line
+
+    while read line; do
+        [[ "$line" == "$veth_name" ]] && {
+            log_info "veth \"$veth_name\" has already been set in netns \"$vxlan_gw_netns_name\""
+            return 0
+        }
+    done < <(ip netns exec $vxlan_gw_netns_name ip link show | grep -P '^[0-9]+: ' | sed -e 's/^[0-9]\+: \([^@]\+\)\(@.*\)\?:.*/\1/g')
+
+    ip link set $veth_name netns $vxlan_gw_netns_name
+}
+
+x_ip_netns_add() {
+    local netns_name="$1"
+    local line
+    while read line; do
+        [[ "$line" == "$netns_name" ]] && {
+            log_info "netns \"$netns_name\" has already existed. Skipping add it"
+            return 0
+        }
+    done < <(ip netns ls | cut -d ' ' -f1)
+
+    ip netns add $netns_name
+}
+
+x_ip_link_add_name_veth() {
+    local veth_name="$1"
+    local veth_peer_name="$2"
+
+    ethtool -S $veth_peer_name > /dev/null 2>&1 && {
+        log_info "veth \"$veth_name\" with peer \"$veth_peer_name\" is already existed. Skipping add it"
+        return 1
+    }
+
+    ip link add name $veth_name type veth peer name $veth_perr_name
+}
+
+x_ip_link_add_vxlan() {
+    local vxlan_name="$1"
+    local host_bridge_ip="$2"
+    local host_bridge_interface="$3"
+
+    ip link show $vxlan_name > /dev/null 2>&1 && {
+        log_info "VXLAN $vxlan_name has already been installed."
+        return 0
+    }
+
+     ip link add $vxlan_name type vxlan id 9 dstport 4789 \
+            local $host_bridge_ip group 239.1.1.1 dev $host_bridge_interface
 }
 
 main "$@"
