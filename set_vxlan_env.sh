@@ -15,6 +15,7 @@ main() {
 init_env() {
     . "$CONFIG_FILE"
 
+    VXLAN_EXTERNAL_BRIDGE_NAME=${VXLAN_EXTERNAL_BRIDGE_NAME:-br9}
     VXLAN_NAME=${VXLAN_NAME:-vxlan9}
     VXLAN_GW_NAME=${VXLAN_GW_NAME:-vxlan9gw}
 
@@ -43,14 +44,14 @@ set_vxlan() {
         # Create a GW connects VXLAN and outer local network segments.
         set -e
         #brctl addbr br100
-        brctl addif br9 ${VXLAN_NAME}
-        brctl stp br9 off
+        brctl addif ${VXLAN_EXTERNAL_BRIDGE_NAME} ${VXLAN_NAME}
+        brctl stp ${VXLAN_EXTERNAL_BRIDGE_NAME} off
         #ip link set up dev br100
         ip link set up dev ${VXLAN_NAME}
 
         ip link add name veth1 type veth peer name veth1-br
         ip netns add ${VXLAN_GW_NAME}
-        brctl addif br9 veth1-br
+        brctl addif ${VXLAN_EXTERNAL_BRIDGE_NAME} veth1-br
         ip link set veth1 netns ${VXLAN_GW_NAME}
         ip link add name veth2 type veth peer name veth2-br
         ip link set veth2 netns ${VXLAN_GW_NAME}
