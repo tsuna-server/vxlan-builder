@@ -96,7 +96,7 @@ x_add_default_gw_on_netns() {
     local netns_name="$1"
     local next_hop_ip="$2"
 
-    ip netns exec vxlan100gw ip route show default | grep -q -P '^default ' && {
+    ip netns exec $netns_name ip route show default | grep -q -P '^default ' && {
         log_info "Default gateway has already set on netns \"$netns_name\". Skipping set it"
         return 0
     }
