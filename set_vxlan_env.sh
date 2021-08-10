@@ -83,7 +83,7 @@ set_vxlan() {
         ip netns exec ${VXLAN_GW_NAME} iptables --table nat \
                 --append POSTROUTING --source ${VXLAN_NAT_SOURCE_IP_TO_INNER_SEGMENT} \
                 --destination ${VXLAN_NAT_SOURCE_IP_TO_OUTER_SEGMENT} --jump MASQUERADE
-        ip netns exec ${VXLAN_GW_NAME} iptables --table nat --list
+        ip netns exec ${VXLAN_GW_NAME} iptables -n --table nat --list
     ) || {
         log_err "Failed to set MASQUERADE of the iptables."
         return 1
@@ -111,12 +111,13 @@ x_ip_address_add_to_interface_on_netns() {
 
     local interface_ip="$(ip netns exec $netns_name ip address show $interface_in_netns | grep -o "inet [0-9]*\.[0-9]*\.[0-9]*\.[0-9]*" | cut -d ' ' -f 2)"
 
-    [[ "$interface_ip" == "$ip" ]] && {
+    [[ "$interface_ip" == "${ip%/*}" ]] && {
+        # Substring end of masks from the IP and compare them.
         log_info "IP \"$ip\" has already set in netns \"$netns_name\". Skipping set it"
         return 0
     }
 
-    ip netns exec ${VXLAN_GW_NAME} ip address add ${VXLAN_GW_INNER_IP} dev veth1
+    ip netns exec $netns_name ip address add $ip dev $interface_in_netns
 }
 
 # Add bridge only if it was not added.
@@ -178,7 +179,7 @@ x_ip_link_add_name_veth() {
         return 1
     }
 
-    ip link add name $veth_name type veth peer name $veth_perr_name
+    ip link add name $veth_name type veth peer name $veth_peer_name
 }
 
 x_ip_link_add_vxlan() {
