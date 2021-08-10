@@ -13,6 +13,15 @@ main() {
 }
 
 init_env() {
+    command -v brctl > /dev/null || {
+        log_err "brctl command was not found. This program requires it."
+        return 1
+    }
+    command -v ethtool > /dev/null || {
+        log_err "ethtool command was not found. This program requires it."
+        return 1
+    }
+
     . "$CONFIG_FILE"
 
     VXLAN_EXTERNAL_BRIDGE_NAME=${VXLAN_EXTERNAL_BRIDGE_NAME:-br9}
@@ -176,7 +185,7 @@ x_ip_link_add_name_veth() {
 
     ethtool -S $veth_peer_name > /dev/null 2>&1 && {
         log_info "veth \"$veth_name\" with peer \"$veth_peer_name\" is already existed. Skipping add it"
-        return 1
+        return 0
     }
 
     ip link add name $veth_name type veth peer name $veth_peer_name
