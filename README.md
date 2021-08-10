@@ -28,11 +28,11 @@ The instruction assumes vxlan-builder has already installed at "/opt/vxlan-build
 ```
 [Unit]
 Description = Custom VXLAN Setting Service
+After = network.target
 
 [Service]
 ExecStart = /opt/vxlan-builder/set_vxlan_env.sh
 Type = oneshot
-Requires = network.target
 
 [Install]
 WantedBy = multi-user.target
