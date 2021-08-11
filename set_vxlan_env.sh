@@ -90,8 +90,7 @@ set_vxlan() {
         ip netns exec ${VXLAN_GW_NAME} iptables --table nat \
                 --append POSTROUTING --source ${VXLAN_NAT_SOURCE_IP_TO_OUTER_SEGMENT} --jump MASQUERADE
         ip netns exec ${VXLAN_GW_NAME} iptables --table nat \
-                --append POSTROUTING --source ${VXLAN_NAT_SOURCE_IP_TO_INNER_SEGMENT} \
-                --destination ${VXLAN_NAT_SOURCE_IP_TO_OUTER_SEGMENT} --jump MASQUERADE
+                --append POSTROUTING --source ${VXLAN_NAT_SOURCE_IP_TO_INNER_SEGMENT} --jump MASQUERADE
         ip netns exec ${VXLAN_GW_NAME} iptables -n --table nat --list
     ) || {
         log_err "Failed to set MASQUERADE of the iptables."
