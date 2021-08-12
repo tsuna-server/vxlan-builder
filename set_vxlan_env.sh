@@ -75,8 +75,8 @@ set_vxlan() {
         ip netns exec ${VXLAN_GW_NAME} sysctl net.ipv4.ip_forward=1
 
         # Add IP to the interface on namespace
-        x_ip_address_add_to_interface_on_netns ${VXLAN_GW_NAME} ${VXLAN_GW_INNER_IP} veth1
-        x_ip_address_add_to_interface_on_netns ${VXLAN_GW_NAME} ${VXLAN_GW_OUTER_IP} veth2
+        x_ip_address_add_to_interface_on_netns ${VXLAN_GW_NAME} ${VXLAN_GW_MANAGEMENT_IP} veth1
+        x_ip_address_add_to_interface_on_netns ${VXLAN_GW_NAME} ${VXLAN_GW_PROVIDER_IP} veth2
         x_add_default_gw_on_netns ${VXLAN_GW_NAME} ${PROVIDER_GW}
     ) || {
         echo "Failed to create bridges and a namespace." >&2
@@ -88,9 +88,9 @@ set_vxlan() {
         set -e
         ip netns exec ${VXLAN_GW_NAME} iptables --table nat --flush
         ip netns exec ${VXLAN_GW_NAME} iptables --table nat \
-                --append POSTROUTING --source ${VXLAN_NAT_SOURCE_IP_TO_OUTER_SEGMENT} --jump MASQUERADE
+                --append POSTROUTING --source ${VXLAN_NAT_SOURCE_IP_TO_PROVIDER_SEGMENT} --jump MASQUERADE
         ip netns exec ${VXLAN_GW_NAME} iptables --table nat \
-                --append POSTROUTING --source ${VXLAN_NAT_SOURCE_IP_TO_INNER_SEGMENT} --jump MASQUERADE
+                --append POSTROUTING --source ${VXLAN_NAT_SOURCE_IP_TO_MANAGEMENT_SEGMENT} --jump MASQUERADE
         ip netns exec ${VXLAN_GW_NAME} iptables -n --table nat --list
     ) || {
         log_err "Failed to set MASQUERADE of the iptables."
