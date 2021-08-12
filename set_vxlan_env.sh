@@ -24,16 +24,16 @@ init_env() {
 
     . "$CONFIG_FILE"
 
-    VXLAN_EXTERNAL_BRIDGE_NAME=${VXLAN_EXTERNAL_BRIDGE_NAME:-br9}
+    HOST_MANAGEMENT_BRIDGE_INTERFACE=${HOST_MANAGEMENT_BRIDGE_INTERFACE:-br9}
     VXLAN_NAME=${VXLAN_NAME:-vxlan9}
     VXLAN_GW_NAME=${VXLAN_GW_NAME:-vxlan9gw}
 
-    HOST_BRIDGE_IP=$(ip address show dev "$HOST_BRIDGE_INTERFACE" \
+    HOST_BRIDGE_IP=$(ip address show dev "$HOST_PROVIDER_BRIDGE_INTERFACE" \
             | grep -o "inet [0-9]*\.[0-9]*\.[0-9]*\.[0-9]*" \
             | cut -d ' ' -f 2)
 
     [[ -z "$HOST_BRIDGE_IP" ]] && {
-        log_err "Failed to get IP of the interface \"$HOST_BRIDGE_INTERFACE\""
+        log_err "Failed to get IP of the interface \"$HOST_PROVIDER_BRIDGE_INTERFACE\""
         return 1
     }
 
@@ -52,20 +52,20 @@ set_vxlan() {
     (
         # Create a GW connects VXLAN and outer local network segments.
         set -e
-        x_ip_link_add_vxlan ${VXLAN_NAME} ${HOST_BRIDGE_IP} ${HOST_BRIDGE_INTERFACE}
+        x_ip_link_add_vxlan ${VXLAN_NAME} ${HOST_BRIDGE_IP} ${HOST_PROVIDER_BRIDGE_INTERFACE}
         #brctl addbr br100
-        x_brctl_addif ${VXLAN_EXTERNAL_BRIDGE_NAME} ${VXLAN_NAME}
-        brctl stp ${VXLAN_EXTERNAL_BRIDGE_NAME} off
+        x_brctl_addif ${HOST_MANAGEMENT_BRIDGE_INTERFACE} ${VXLAN_NAME}
+        brctl stp ${HOST_MANAGEMENT_BRIDGE_INTERFACE} off
         #ip link set up dev br100
-        ip link set up dev ${VXLAN_EXTERNAL_BRIDGE_NAME}
+        ip link set up dev ${HOST_MANAGEMENT_BRIDGE_INTERFACE}
 
         x_ip_netns_add ${VXLAN_GW_NAME}
         x_ip_link_add_name_veth veth1 veth1-br
-        x_brctl_addif ${VXLAN_EXTERNAL_BRIDGE_NAME} veth1-br
+        x_brctl_addif ${HOST_MANAGEMENT_BRIDGE_INTERFACE} veth1-br
         x_ip_link_set_veth_to_netns veth1 ${VXLAN_GW_NAME}
         x_ip_link_add_name_veth veth2 veth2-br
         x_ip_link_set_veth_to_netns veth2 ${VXLAN_GW_NAME}
-        x_brctl_addif ${HOST_BRIDGE_INTERFACE} veth2-br
+        x_brctl_addif ${HOST_PROVIDER_BRIDGE_INTERFACE} veth2-br
 
         ip link set veth1-br up
         ip netns exec ${VXLAN_GW_NAME} ip link set veth1 up
