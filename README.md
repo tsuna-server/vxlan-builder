@@ -53,3 +53,8 @@ systemctl start custom-vxlan.service
 systemctl status custom-vxlan.service
 ```
 
+# Diagram
+
+![Basic visual](diagram/DiagramDrawIO.drawio.svg)
+
+
