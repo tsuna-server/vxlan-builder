@@ -48,6 +48,8 @@ log_info() {
 }
 
 set_vxlan() {
+    local management_interface_name
+
     # Create interfaces
     (
         # Create a GW connects VXLAN and outer local network segments.
@@ -86,10 +88,20 @@ set_vxlan() {
     # Set NAT MASQUERADE
     (
         set -e
+
+        management_interface_name="$(find_vxlan_gw_management_interface_from_ip $VXLAN_GW_MANAGEMENT_IP)"
+        provider_interface_name="$(find_vxlan_gw_management_interface_from_ip $VXLAN_GW_PROVIDER_IP)"
+        [ -z "$management_interface_name" ] && {
+            log_err "Failed to find an interface of management segment in vxlan ${VXLAN_GW_NAME}"
+            false
+        }
+
         ip netns exec ${VXLAN_GW_NAME} iptables --table nat --flush
-        ip netns exec ${VXLAN_GW_NAME} iptables --table nat \
+        #ip netns exec ${VXLAN_GW_NAME} iptables --table nat \
+        #        --append POSTROUTING --source ${VXLAN_NAT_SOURCE_IP_TO_PROVIDER_SEGMENT} --jump MASQUERADE
+        ip netns exec ${VXLAN_GW_NAME} iptables --table nat -o $management_interface_name \
                 --append POSTROUTING --source ${VXLAN_NAT_SOURCE_IP_TO_PROVIDER_SEGMENT} --jump MASQUERADE
-        ip netns exec ${VXLAN_GW_NAME} iptables --table nat \
+        ip netns exec ${VXLAN_GW_NAME} iptables --table nat -o $provider_interface_name \
                 --append POSTROUTING --source ${VXLAN_NAT_SOURCE_IP_TO_MANAGEMENT_SEGMENT} --jump MASQUERADE
         ip netns exec ${VXLAN_GW_NAME} iptables -n --table nat --list
     ) || {
@@ -203,6 +215,30 @@ x_ip_link_add_vxlan() {
      ip link add $vxlan_name type vxlan id 9 dstport 4789 \
             local $host_bridge_ip group 239.1.1.1 dev $host_bridge_interface
 }
+
+find_vxlan_gw_management_interface_from_ip() {
+    local ip_of_target_interface="$1"
+    local ip interface line
+
+    while read line; do
+        if [[ "$line" =~ ^[0-9]+:.* ]]; then
+            #result=$(sed -e 's/^[0-9]\+: \([^ ]\+\).*/\1/g')
+            interface=$(sed -e 's/^[0-9]\+: \([^:]\+\)\+: .*/\1/g' <<< "$line")
+            interface=${interface%@*}
+        elif [[ "$line" =~ ^\s*inet\ [0-9]+(\.[0-9]+){3}/[0-9]+\ scope\ .* ]]; then
+            # Get the line of IP address
+            ip=$(cut -d ' ' -f 2 <<< "$line")
+            if [[ "$ip" == "${ip_of_target_interface}" ]]; then
+                echo "$interface"
+                return
+            fi
+        fi
+    done < <(ip netns exec ${VXLAN_GW_NAME} ip a)
+
+    return
+}
+
+
 
 main "$@"
 
