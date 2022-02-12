@@ -24,7 +24,7 @@ init_env() {
 
     . "$CONFIG_FILE"
 
-    HOST_MANAGEMENT_BRIDGE_INTERFACE=${HOST_MANAGEMENT_BRIDGE_INTERFACE:-br9}
+    HOST_TENANT_BRIDGE_INTERFACE=${HOST_TENANT_BRIDGE_INTERFACE:-br9}
     VXLAN_NAME=${VXLAN_NAME:-vxlan9}
     VXLAN_GW_NAME=${VXLAN_GW_NAME:-vxlan9gw}
 
@@ -48,7 +48,7 @@ log_info() {
 }
 
 set_vxlan() {
-    local management_interface_name
+    local tenant_interface_name
 
     # Create interfaces
     (
@@ -56,14 +56,14 @@ set_vxlan() {
         set -e
         x_ip_link_add_vxlan ${VXLAN_NAME} ${HOST_BRIDGE_IP} ${HOST_PROVIDER_BRIDGE_INTERFACE}
         #brctl addbr br100
-        x_brctl_addif ${HOST_MANAGEMENT_BRIDGE_INTERFACE} ${VXLAN_NAME}
-        brctl stp ${HOST_MANAGEMENT_BRIDGE_INTERFACE} off
+        x_brctl_addif ${HOST_TENANT_BRIDGE_INTERFACE} ${VXLAN_NAME}
+        brctl stp ${HOST_TENANT_BRIDGE_INTERFACE} off
         #ip link set up dev br100
-        ip link set up dev ${HOST_MANAGEMENT_BRIDGE_INTERFACE}
+        ip link set up dev ${HOST_TENANT_BRIDGE_INTERFACE}
 
         x_ip_netns_add ${VXLAN_GW_NAME}
         x_ip_link_add_name_veth veth1 veth1-br
-        x_brctl_addif ${HOST_MANAGEMENT_BRIDGE_INTERFACE} veth1-br
+        x_brctl_addif ${HOST_TENANT_BRIDGE_INTERFACE} veth1-br
         x_ip_link_set_veth_to_netns veth1 ${VXLAN_GW_NAME}
         x_ip_link_add_name_veth veth2 veth2-br
         x_ip_link_set_veth_to_netns veth2 ${VXLAN_GW_NAME}
@@ -77,7 +77,7 @@ set_vxlan() {
         ip netns exec ${VXLAN_GW_NAME} sysctl net.ipv4.ip_forward=1
 
         # Add IP to the interface on namespace
-        x_ip_address_add_to_interface_on_netns ${VXLAN_GW_NAME} ${VXLAN_GW_MANAGEMENT_IP} veth1
+        x_ip_address_add_to_interface_on_netns ${VXLAN_GW_NAME} ${VXLAN_GW_TENANT_IP} veth1
         x_ip_address_add_to_interface_on_netns ${VXLAN_GW_NAME} ${VXLAN_GW_PROVIDER_IP} veth2
         x_add_default_gw_on_netns ${VXLAN_GW_NAME} ${PROVIDER_GW}
     ) || {
@@ -89,20 +89,20 @@ set_vxlan() {
     (
         set -e
 
-        management_interface_name="$(find_vxlan_gw_management_interface_from_ip $VXLAN_GW_MANAGEMENT_IP)"
-        provider_interface_name="$(find_vxlan_gw_management_interface_from_ip $VXLAN_GW_PROVIDER_IP)"
-        [ -z "$management_interface_name" ] && {
-            log_err "Failed to find an interface of management segment in vxlan ${VXLAN_GW_NAME}"
+        tenant_interface_name="$(find_vxlan_gw_tenant_interface_from_ip $VXLAN_GW_TENANT_IP)"
+        provider_interface_name="$(find_vxlan_gw_tenant_interface_from_ip $VXLAN_GW_PROVIDER_IP)"
+        [ -z "$tenant_interface_name" ] && {
+            log_err "Failed to find an interface of tenant segment in vxlan ${VXLAN_GW_NAME}"
             false
         }
 
         ip netns exec ${VXLAN_GW_NAME} iptables --table nat --flush
         #ip netns exec ${VXLAN_GW_NAME} iptables --table nat \
         #        --append POSTROUTING --source ${VXLAN_NAT_SOURCE_IP_TO_PROVIDER_SEGMENT} --jump MASQUERADE
-        ip netns exec ${VXLAN_GW_NAME} iptables --table nat -o $management_interface_name \
+        ip netns exec ${VXLAN_GW_NAME} iptables --table nat -o $tenant_interface_name \
                 --append POSTROUTING --source ${VXLAN_NAT_SOURCE_IP_TO_PROVIDER_SEGMENT} --jump MASQUERADE
         ip netns exec ${VXLAN_GW_NAME} iptables --table nat -o $provider_interface_name \
-                --append POSTROUTING --source ${VXLAN_NAT_SOURCE_IP_TO_MANAGEMENT_SEGMENT} --jump MASQUERADE
+                --append POSTROUTING --source ${VXLAN_NAT_SOURCE_IP_TO_TENANT_SEGMENT} --jump MASQUERADE
         ip netns exec ${VXLAN_GW_NAME} iptables -n --table nat --list
     ) || {
         log_err "Failed to set MASQUERADE of the iptables."
@@ -216,7 +216,7 @@ x_ip_link_add_vxlan() {
             local $host_bridge_ip group 239.1.1.1 dev $host_bridge_interface
 }
 
-find_vxlan_gw_management_interface_from_ip() {
+find_vxlan_gw_tenant_interface_from_ip() {
     local ip_of_target_interface="$1"
     local ip interface line
 
@@ -237,8 +237,6 @@ find_vxlan_gw_management_interface_from_ip() {
 
     return
 }
-
-
 
 main "$@"
 
